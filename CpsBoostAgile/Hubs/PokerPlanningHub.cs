@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Web;
 using CpsBoostAgile.BL;
 using CpsBoostAgile.BL.API;
@@ -31,7 +32,15 @@ namespace CpsBoostAgile.Hubs
 
         #region User Management
 
+        public override Task OnDisconnected(bool stopCalled)
+        {
+            var eventId = _userContainer.DeleteUser(GetConnectionIdForUser());
 
+            if (!string.IsNullOrWhiteSpace(eventId))
+                UpdateCurrentOnlineUserList(eventId);
+
+            return base.OnDisconnected(stopCalled);
+        }
 
         public void setUserReady()
         {
