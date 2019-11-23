@@ -1,0 +1,7 @@
+﻿.break-word {
+    word-wrap: break-word;
+}
+
+.validation-msg {
+    color: #c05b59;
+}

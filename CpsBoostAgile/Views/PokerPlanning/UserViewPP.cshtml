@@ -1,0 +1,352 @@
+﻿@using CpsBoostAgile.Enumeration
+@model CpsBoostAgile.Models.PokerPlanning.PPViewModels
+@{
+    ViewBag.Title = "Poker Planning";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+
+    var currentUserStoryId = "";
+    var currentUserStoryText = "";
+    var currentUserStoryComment = "";
+    if (Model.CurrentRunningUserStory != null)
+    {
+        currentUserStoryId = Model.CurrentRunningUserStory.Id;
+        currentUserStoryText = Model.CurrentRunningUserStory.Description;
+        currentUserStoryComment = Model.CurrentRunningUserStory.Comment;
+    }
+}
+
+@section scripts{
+    <script src="~/Scripts/jquery.signalR-2.4.1.js"></script>
+    <script type="text/javascript" src="~/signalr/hubs"></script>
+    <script src="~/Scripts/clipboard.min.js"></script>
+    <script src="~/Scripts/jquery-ui.js"></script>
+    <link href="~/Content/Custom/userstory.css" rel="stylesheet" />
+    <link href="~/Content/Custom/modalwindow.css" rel="stylesheet" />
+    <link href="~/Content/Custom/upperpanel.css" rel="stylesheet" />
+    <link href="~/Content/Custom/userscoloring.css" rel="stylesheet" />
+    <link href="~/Content/Custom/sidebar.css" rel="stylesheet" />
+    <link href="~/Content/Custom/loader.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <script>
+        $(function () {
+            var phase;
+            var pokerPlanningId;
+            $(document).ready(function () {
+                
+                phase = '@Model.Phase';
+                pokerPlanningId = '@Model.Id';
+
+                if (phase !== '@PhaseEnum.Completed') {
+                $('#modalLogin').modal('show');
+                $('#modalLogin').find('input').focus();
+                }
+
+                switch (phase) {
+                case '@PhaseEnum.Awaiting':
+                    startAwaitingPhase();
+                    break;
+                case '@PhaseEnum.Running':
+                    setRunningPhase();
+                    break;
+                case '@PhaseEnum.Presentation':
+                    startAwaitingPhase();
+                    break;
+                case '@PhaseEnum.Completed':
+                    finishPP();
+                    break;
+                }
+
+                if (phase !== '@PhaseEnum.Completed') {
+                    $('#modalLogin').on('shown.bs.modal',
+                        function() {
+                            $('#modalNameInput').focus();
+                        });
+                }
+
+                var ppEventHub = $.connection.pokerPlanningHub;
+
+                ppEventHub.client.invalidLoginName = function (message) {
+                    $('#notValidName').show();
+                    $('#notValidName').text(message);
+                    $('#modalNameInput').focus();
+                };
+
+                ppEventHub.client.switchBackToAwaiting = function() {
+                    phase = '@PhaseEnum.Awaiting';
+                    startAwaitingPhase();
+                }
+
+                ppEventHub.client.startPresentation = function(estimations) {
+
+                    var items = $.parseJSON(estimations);
+                    var i;
+                    $('#estimation_results').empty();
+                    for (i = 0; i < items.length; i++) {
+
+                        var est;
+                        var strVoters = items[i].Voters.join(", ");
+                        if (items[i].Estimation == 9999) {
+                            est = '<li><div class="col-md-2" ><i class="fa fa-coffee"></i></div><div class="col-md-10 estimators">' +
+                                items[i].NumberOfVoters +
+                                ' estimator(s): '+ strVoters +'</div></li>';
+                        
+                            $('#estimation_results').append(est);
+
+                            continue;
+                        }
+
+                        est = '<li><div class="col-md-2" >' +
+                            items[i].Estimation +
+                            ' points</div> <div class="col-md-10 estimators">' +
+                            items[i].NumberOfVoters +
+                            ' estimator(s): '+ strVoters +'</div></li><br>';
+                        
+                        $('#estimation_results').append(est);
+                    }
+                    switchToPresentationPhase();
+                }
+
+                ppEventHub.client.continuePP = function() {
+                    $('#coffeeBreak_panel').hide();
+                    $('#coffeeBreak').hide();
+                    switchToPresentationPhase();
+                }
+
+                ppEventHub.client.showCoffeeBreak = function() {
+                    $('#presentation_phase_panel').hide();
+                    $('#coffeeBreak_panel').show();
+                    $('#coffeeBreak').show();
+                }
+
+                ppEventHub.client.startUserStory = function (storyId, text, comment) {
+                    userStoryId = storyId;
+                    phase = '@PhaseEnum.Running';
+                    $('#selectable .ui-selected').removeClass('ui-selected');
+                    setRunningPhase();
+                    $("div[name='userStoryBody']").attr('id',storyId);
+                    $( "#userStoryComment" ).empty();
+                    $( "#userStoryText" ).empty();
+                    $( "#userStoryText" ).append(text);
+                    $( "#userStoryComment" ).append(comment);
+                }
+
+                ppEventHub.client.userConnected = function (name) {
+                    $('#modalLogin').modal('hide');
+                };
+
+                ppEventHub.client.switchToReady = function () {
+                    $('#btn_ready').prop('disabled', true);
+                }
+
+                ppEventHub.client.updateOnlineUsers = function (data) {
+                    var items = $.parseJSON(data);
+                    var i;
+
+                    $('#list_users').empty();
+
+                    for (i = 0; i < items.length; i++) {
+                        if (items[i].IsReadyToShare == true)
+                        {
+                            $('#list_users').append(
+                                '<li><i class="glyphicon glyphicon-ok user' + items[i].Color + '"></i> ' + items[i].Name + '</li>'
+                            );
+                        }
+                        else
+                        {
+                            $('#list_users').append(
+                                '<li><i class="glyphicon glyphicon-user user' + items[i].Color + '"></i> ' + items[i].Name + '</li>'
+                            );
+                        }
+                    }
+                    $('#div_onlineUsers').text('Online Users: ' + i);
+                };
+
+                ppEventHub.client.finishEvent = function () {
+                    phase = '@PhaseEnum.Completed';
+                    finishPP();
+                }
+
+                ppEventHub.client.updateComment = function(comment) {
+                    $( "#userStoryComment" ).empty();
+                    $( "#userStoryComment" ).append(comment);
+                    blinkTxt();
+                }
+
+
+                $.connection.hub.logging = true;
+
+                $.connection.hub.start().done(function () {
+                });
+
+                $('#user_login').on('submit', function (e) {
+                    e.preventDefault();
+                    $('#notValidName').hide();
+                    ppEventHub.server.addRegularUserToPool($('#modalNameInput').val(), pokerPlanningId);
+                });
+
+                $('#btn_ready').click(function () {
+                    ppEventHub.server.setUserReady();
+                });
+
+                $('.estItem').click(function () {
+                    var estValue = $(this).val();
+                    ppEventHub.server.assignEstimationFromUser(estValue);
+                });
+
+
+            });
+
+
+
+            function blinkTxt() {
+
+                $('.blink').fadeOut('slow', function() {
+                    $(this).fadeIn('slow', function() {
+                        $(this).fadeOut('slow');
+                    });
+                });
+            }
+
+            function startAwaitingPhase() {
+                $('#running_phase_panel').hide();
+                $('#presentation_phase_panel').hide();
+                $('#estimation_results').hide();
+                $('#userStory_preparation').hide();
+                $("#selectable").hide();
+                $("div[name='userStoryBody']").hide();
+                $('#awaiting_phase_panel').show();
+            };
+
+            function setRunningPhase() {
+                $('#estimation_results').hide();
+                $('#awaiting_phase_panel').hide();
+                $('#presentation_phase_panel').hide();
+                $('#userStory_preparation').hide();
+                $('#btn_ready').prop('disabled', false);
+                $('#running_phase_panel').show();
+                $("#selectable").show();
+                $("div[name='userStoryBody']").show();
+                $( "#selectable" ).selectable();
+            };
+
+            function switchToPresentationPhase() {
+                $('#awaiting_phase_panel').hide();
+                $('#running_phase_panel').hide();
+                $('#shareUrl').hide();
+                $("#selectable").hide();
+                $("div[name='userStoryBody']").show();
+                $('#presentation_phase_panel').show();
+                $('#estimation_results').show();
+            };
+
+            function finishPP() {
+                $('#awaiting_phase_panel').hide();
+                $('#running_phase_panel').hide();
+                $('#presentation_phase_panel').hide();
+                $('#userStory_preparation').hide();
+                $("#selectable").hide();
+                $("div[name='userStoryBody']").hide();
+                $("#completed_phase_panel").show();
+            };
+
+        });
+
+    </script>
+}
+
+<div class="modal fade" id="modalLogin" hidden tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header modal-header-primary text-center">
+                <h1>You are entering Poker Planning</h1>
+            </div>
+            <div class="modal-body">
+                <form id="user_login" class="form-horizontal">
+                    <div class="form-group row">
+                        <label class="control-label col-sm-2">Name:</label>
+                        <div class="col-sm-10">
+                            <input type="text" class="form-control" id="modalNameInput" name="modalNameInput" placeholder="Enter your name:">
+                            <div class="validation-msg" id="notValidName" hidden></div>
+                        </div>
+                    </div>
+                    <input type="submit" value="Enter" class="btn btn-primary onclick=" return false"" />
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container-fluid">
+    <div id="onlineUsersNavigationBar" class="sidenav">
+        <h5 id="div_onlineUsers"></h5>
+        <ul class="list-group" id="list_users"></ul>
+    </div>
+
+    <div id="main">
+        <div class="well">
+            <div class="row text-center" hidden id="awaiting_phase_panel">
+                <div class="loader"></div>
+                <h3>Please wait till Moderator starts Poker Planning.</h3>
+            </div>
+            
+            <div class="row text-center" hidden id="coffeeBreak_panel">
+                <div class="loader"></div>
+                <br>
+                <h3 hidden id="coffeeBreak"><i class="fa fa-coffee"></i> Coffee break!</h3>
+            </div>
+            
+            <div class="row text-center" hidden id="running_phase_panel">
+                
+                    <h3>Read User Story and choose estimation card!</h3>
+                    <div class="btn-group btn-group-lg" role="group">
+                        <button type="button" id="btn_ready" class="btn btn-info text-center">I am ready</button>
+                    </div>
+                
+            </div>
+
+            <div class="row text-center" hidden id="presentation_phase_panel">
+                <h3>Discuss results with the team!</h3>
+            </div>
+
+            <div class="row text-center" hidden id="completed_phase_panel">
+                <h3>Poker Planning is finished! Thank you for participation!</h3>
+                <div class="btn-group btn-group-lg" role="group" aria-label="...">
+                    <button onclick="location.href='@Url.Action("Export", "Event", new {Model.Id})'" style="background-color:green" type="button" class="btn btn-primary text-center">Export to Excel</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row" style="text-align:left">
+            <ul class="list-group" style="list-style-type:none" hidden id="estimation_results"></ul>
+        </div>
+
+        <div class="row">
+            <ol hidden id="selectable">
+                <li value="0" class="ui-state-default estItem">0</li>
+                <li value="1" class="ui-state-default estItem">1</li>
+                <li value="2" class="ui-state-default estItem">2</li>
+                <li value="3" class="ui-state-default estItem">3</li>
+                <li value="5" class="ui-state-default estItem">5</li>
+                <li value="8" class="ui-state-default estItem">8</li>
+                <li value="13" class="ui-state-default estItem">13</li>
+                <li value="21" class="ui-state-default estItem">21</li>
+                <li value="34" class="ui-state-default estItem">34</li>
+                <li value="55" class="ui-state-default estItem">55</li>
+                <li value="89" class="ui-state-default estItem">89</li>
+                <li value="9999" class="ui-state-default estItem"><i class="fa fa-coffee"></i></li>
+            </ol>
+        </div>
+        <br>
+        <div class="row" hidden name="userStoryBody" id="@currentUserStoryId" style="text-align:right">
+            <div class="well clearfix" style="text-align:center"><h3>User Story</h3>
+                <div id="userStoryText" class="form-control">@currentUserStoryText</div>
+                </div>
+            <div class="well clearfix" style="text-align:center">
+                <h3>Comments</h3>
+                <h4 hidden class="blink" style="color:green">Comment updated!</h4>
+                <div id="userStoryComment" class="form-control">@currentUserStoryComment</div>
+            </div>
+        </div>
+
+    </div>
+</div>

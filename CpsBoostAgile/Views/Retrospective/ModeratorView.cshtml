@@ -1,0 +1,449 @@
+﻿@using CpsBoostAgile.Enumeration
+@model CpsBoostAgile.Models.Retrospective.RetrospectiveViewModels
+@{
+    ViewBag.Title = "Moderate Retrospective";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+@section scripts{
+<script src="~/Scripts/jquery.signalR-2.4.1.js"></script>
+<script type="text/javascript" src="~/signalr/hubs"></script>
+<script src="~/Scripts/clipboard.min.js"></script>
+<link href="~/Content/Custom/modalwindow.css" rel="stylesheet" />
+<link href="~/Content/Custom/upperpanel.css" rel="stylesheet" />
+<link href="~/Content/Custom/userscoloring.css" rel="stylesheet" />
+<link href="~/Content/Custom/sidebar.css" rel="stylesheet" />
+
+<script>
+    $(function () {
+
+        var phase;
+        var itemIdList = [];
+        var enableVoting;
+        var votes;
+
+        $(document).ready(function () {
+
+            // activate clipboard functionality
+            var clipboard = new ClipboardJS('.btn');
+
+            phase = '@Model.Phase';
+            votes = '@Model.MaxVotesPerUser.GetValueOrDefault()';
+            enableVoting = '@Model.EnableVoting';
+
+            if (enableVoting == "False")
+                $('#btn_startVoting').hide();
+            $('#div_availableVotes').text("Remaining votes: " + votes);
+
+
+            switch (phase) {
+                case '@PhaseEnum.Awaiting':
+                    startAwaitingPhase();
+                    break;
+                case '@PhaseEnum.Running':
+                    setRunningPhase();
+                    break;
+                case '@PhaseEnum.Presentation':
+                    switchToPresentationPhase();
+                    break;
+                case '@PhaseEnum.Voting':
+                    switchToVotingPhase();
+                    break;
+                case '@PhaseEnum.Completed':
+                    finishRetrospective();
+                    break;
+            }
+
+            var retroEventHub = $.connection.retrospectiveHub;
+
+            retroEventHub.client.setRetrospectiveRunningPhase = function () {
+                phase = '@PhaseEnum.Running';
+                setRunningPhase();
+            }
+
+            retroEventHub.client.setRetrospectivePresentationPhase = function () {
+                phase = '@PhaseEnum.Presentation';
+                switchToPresentationPhase();
+            }
+
+            retroEventHub.client.setRetrospectiveVotingPhase = function () {
+                phase = '@PhaseEnum.Voting';
+                switchToVotingPhase();
+            }
+
+            retroEventHub.client.finishRetrospectiveEvent = function () {
+                phase = '@PhaseEnum.Completed';
+                finishRetrospective();
+            }
+
+            retroEventHub.client.switchToReady = function () {
+                $('#btn_ready').prop('disabled', true);
+            }
+
+            retroEventHub.client.receiveNewSharedItem = function (data) {
+                var item = $.parseJSON(data);
+
+                shareItem(item.Id, item.Group, item.CreatedBy, item.Text, item.TotalAssignedVotes, item.IsEnabledForVoting, item.Color); 
+            }
+
+            retroEventHub.client.recieveSharedItems = function (data) {
+                var sharedItems = $.parseJSON(data);
+
+                if(sharedItems.length !== 0)
+                    votes = sharedItems[0].RemainedVotesForParticularUser;
+                if (votes <= 0)
+                    votes = 0;
+
+                $('#div_availableVotes').text("Remaining votes: " + votes);
+
+                for (var i = 0; i < sharedItems.length; i++)
+                    shareItem(sharedItems[i].Id, sharedItems[i].Group, sharedItems[i].CreatedBy, sharedItems[i].Text, sharedItems[i].TotalAssignedVotes, sharedItems[i].IsEnabledForVoting, sharedItems[i].Color);
+
+            }
+
+            retroEventHub.client.updateOnlineUsers = function (data) {
+                var items = $.parseJSON(data);
+                var i;
+
+                $('#list_users').empty();
+
+                for (i = 0; i < items.length; i++) {
+                    if (items[i].IsReadyToShare == true)
+                    {
+                        $('#list_users').append(
+                            '<li><i class="glyphicon glyphicon-ok user' + items[i].Color + '"></i> ' + items[i].Name + '</li>'
+                        );
+                    }
+                    else
+                    {
+                        $('#list_users').append(
+                           '<li><i class="glyphicon glyphicon-user user' + items[i].Color + '"></i> ' + items[i].Name + '</li>'
+                       );
+                    }
+                }
+                $('#div_onlineUsers').text('Online Users: ' + i);
+            };
+
+            retroEventHub.client.assignVoteToSharedItem = function (data) {
+                var item = $.parseJSON(data);
+
+                columnType = item.Group;
+                sharedItemId = item.Id;
+                sharedItemVotes = item.TotalAssignedVotes;
+                // change it, if more than one votes can be assigned from one user
+                sharedItemEnableVoting = item.IsEnabledForVoting;
+
+                remainedVotesForUser = item.RemainedVotesForParticularUser;
+                $('#div_availableVotes').text("Remaining votes: " + remainedVotesForUser);
+                if (remainedVotesForUser <= 0)
+                    $('.btn_vote').prop('disabled', true);
+
+                $("li").each(function (index) {
+                    if ($(this).attr('name') == sharedItemId)
+                    {
+                        if (sharedItemEnableVoting == false)
+                            $(this).find('.btn_vote').prop('disabled', true);
+
+                        var element = $(this).find('.sharedItem_votes');
+                        if (element.attr('votes') < sharedItemVotes)
+                        {
+                            element.text('Votes: ' + sharedItemVotes);
+                            element.attr('votes', sharedItemVotes);
+                        }
+                    }
+                });
+            };
+
+            $.connection.hub.logging = true;
+
+            $.connection.hub.start().done(function () {
+                retroEventHub.server.addModeratorToPool('@Model.Id');
+            });
+
+            $(document).on("click", '.shareBtn', function () {
+                column = $(this).parent().parent().parent().attr('name');
+                text = $(this).parent().parent().find('.preparedItem').val();
+
+                $(this).parent().parent().remove();
+
+                retroEventHub.server.shareRetrospectiveItem(column, text);
+            });
+
+
+            $(document).on('click', '.deleteBtn', function () {
+                $(this).parent().parent().remove();
+            });
+
+
+            $(document).on('click', '.btn_vote', function () {
+                var sharedIdGuid = $(this).parent().parent().parent().parent().parent().attr('name');
+
+                retroEventHub.server.addVoteToSharedItem(sharedIdGuid);
+            });
+
+
+            $('#btn_ready').click(function () {
+                retroEventHub.server.setUserReady();
+            });
+
+            
+            $('#btn_start_retrospective').click(function () {
+                retroEventHub.server.setRetrospectiveToRunning();
+            });
+
+            
+            $('#btn_startPresentationPhase').click(function () {
+                retroEventHub.server.setRetrospectiveToPresentation();
+            });
+
+            
+            $('#btn_startVoting').click(function () {
+                retroEventHub.server.setRetrospectiveToVoting();
+            });
+
+            
+            $(document).on('click', '.finishRetrospective', function () {
+                retroEventHub.server.finishEvent();
+            });
+
+            $('#btn_toEvents').click(function () {
+                var url = '@Url.Action("Events", "Event")';
+                window.location.href = url;
+            });
+
+
+
+
+            $('#btn_start_addItem').click(function () {
+                addItemToList('@("list_" + RetrospectiveColumnTypeEnum.Start)', "@RetrospectiveColumnTypeEnum.Start");
+            });
+
+
+            $('#btn_continue_addItem').click(function () {
+                addItemToList('@("list_" + RetrospectiveColumnTypeEnum.Continue)', "@RetrospectiveColumnTypeEnum.Continue");
+            });
+
+
+            $('#btn_stop_addItem').click(function () {
+                addItemToList('@("list_" + RetrospectiveColumnTypeEnum.Stop)', "@RetrospectiveColumnTypeEnum.Stop");
+            });
+
+        });
+
+        function addItemToList(list, placeholder) {
+            var item =
+              $('<li class="list-group-item well clearfix listBlock">').append(
+                  $('<textarea type="textarea" class="form-control preparedItem" rows="3" placeholder="' + placeholder + '"></textarea>' +
+                    '<div class="btn-group" role="group">' +
+                    '<input type="button" class="btn btn-success shareBtn" disabled value="Share"/>' +
+                    '<input type="button" class="btn btn-danger deleteBtn" value="Delete"/>' +
+                    '</div>'
+            ));
+            $('#' + list).append(item);
+            $(item).find('textarea').focus();
+        };
+
+        
+        function shareItem(id, column, createdBy, text, totalVotes, isVotingEnabled, color) {
+            var exist = false;
+            var hidden = "hidden";
+            var disabled = "";
+            var listId;
+
+            if (column == @((int)RetrospectiveColumnTypeEnum.Start))
+                listId = '@("list_" + RetrospectiveColumnTypeEnum.Start)';
+            else if (column == @((int)RetrospectiveColumnTypeEnum.Stop))
+                listId = '@("list_" + RetrospectiveColumnTypeEnum.Stop)';
+            else if (column == @((int)RetrospectiveColumnTypeEnum.Continue))
+                listId = '@("list_" + RetrospectiveColumnTypeEnum.Continue)';
+
+            if (enableVoting == "True" && (phase == '@PhaseEnum.Voting' || phase == '@PhaseEnum.Completed'))
+                hidden = "";
+            
+            if (isVotingEnabled == false || votes <= 0)
+                disabled = "disabled";
+
+            for (var i = 0; i < itemIdList.length; i++) {
+                if (id == itemIdList[i])
+                    exist = true;
+            }
+
+            if (exist == false) {
+                itemIdList.push(id);
+
+                $('#' + listId).prepend(
+                    $('<li class="list-group-item well well-sm item-shared' + color + ' clearfix" name="' + id + '" column="' + column + '">').append(
+                        $('<div class="text-center">' + text + '<div>' +
+                            '<div class="row sharedItem_voting_panel"' + hidden + '>' +
+                                '<div class="col-md-6 text-left">' +
+                                    '<div class="sharedItem_votes" votes="' + totalVotes + '">Votes: ' + totalVotes + '</div>' +
+                                '</div>' +
+                                '<div class="col-md-6 text-right">' +
+                                    '<input type="button" class="btn btn-xs btn-success btn_vote" ' + disabled + ' value="Vote"/>' +
+                                '</div>' +
+                            '</div>'
+                )));
+            }
+
+            if (phase == '@PhaseEnum.Completed') {
+                $('.btn_vote').hide();
+            } 
+        };
+
+
+        function disableAddItemsBtn(value) {
+            $('#btn_start_addItem').prop('disabled', value);
+            $('#btn_continue_addItem').prop('disabled', value);
+            $('#btn_stop_addItem').prop('disabled', value);
+        };
+
+        function startAwaitingPhase() {
+            disableAddItemsBtn(true);
+            $('#awaiting_phase_panel').show();
+        };
+
+        function setRunningPhase() {
+            $('#awaiting_phase_panel').hide();
+            $('#running_phase_panel').show();
+            disableAddItemsBtn(false);
+        };
+
+        function switchToPresentationPhase() {
+            $('#awaiting_phase_panel').hide();
+            $('#running_phase_panel').hide();
+            $('#presentation_phase_panel').show();
+            $('.preparedItem').prop('disabled', true);
+            disableAddItemsBtn(true);
+
+            $('.shareBtn').prop('disabled', false);
+        };
+
+        function switchToVotingPhase() {
+            $('.preparedItem').hide();
+            $('#awaiting_phase_panel').hide();
+            $('#running_phase_panel').hide();
+            $('#presentation_phase_panel').hide();
+            $("#voting_phase_panel").show();
+            disableAddItemsBtn(true);
+            $('.sharedItem_voting_panel').show();
+            $('.preparedItem').parent().remove();
+        };
+
+        function finishRetrospective() {
+            $('.preparedItem').hide();
+            $('.btn_vote').hide();
+            $('#shareUrl').hide();
+            $('#awaiting_phase_panel').hide();
+            $('#running_phase_panel').hide();
+            $('#presentation_phase_panel').hide();
+            $("#voting_phase_panel").hide();
+            $("#completed_phase_panel").show();
+            disableAddItemsBtn(true);
+        };
+
+
+    });
+</script>
+}
+
+<div class="container-fluid">
+
+
+    <div id="onlineUsersNavigationBar" class="sidenav">
+        <h5 id="div_onlineUsers"></h5>
+        <ul class="list-group" id="list_users"></ul>
+    </div>
+
+    <div id="main">
+
+        <div class="well">
+            <div class="row text-center" id="shareUrl">
+                <h3>Share URL with your team</h3>
+                <h4 id="url_event" class="break-word">@Model.Url</h4>
+                <button class="btn btn-default" type="button" data-clipboard-target="#url_event">Copy</button>
+            </div>
+
+            <div class="row" hidden id="awaiting_phase_panel">
+                <div class="col-md-6 text-center">
+                </div>
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-right" role="group">
+                        <button type="button" id="btn_start_retrospective" class="btn btn-primary text-center">Start Retrospective</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row" hidden id="running_phase_panel">
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-left" role="group">
+                        <button type="button" id="btn_ready" class="btn btn-primary text-center">I am ready to share</button>
+                    </div>
+                </div>
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-right" role="group">
+                        <button type="button" id="btn_startPresentationPhase" class="btn btn-success text-center">Switch to Presentation phase</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row" hidden id="presentation_phase_panel">
+                <div class="col-md-6 text-center">
+                </div>
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-right" role="group" aria-label="...">
+                        <button type="button" id="btn_startVoting" class="btn btn-primary text-center">Switch to Voting phase</button>
+                        <button type="button" class="btn btn-danger text-center finishRetrospective">Finish event</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row" hidden id="voting_phase_panel">
+                <div class="col-md-6 text-center">
+                    <div id="div_availableVotes"></div>
+                </div>
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-right" role="group" aria-label="...">
+                        <button type="button" class="btn btn-danger text-center finishRetrospective">Finish event</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row" hidden id="completed_phase_panel">
+                <div class="col-md-6 text-center">
+                    <h3>Retrospective is finished!</h3>
+                </div>
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-right" role="group" aria-label="...">
+                        <button type="button" id="btn_toEvents" class="btn btn-primary text-center">To My Events</button>
+                        <button onclick="location.href='@Url.Action("Export", "Event", new {Model.Id})'" style="background-color:green" type="button" class="btn btn-primary text-center">Export to Excel</button>
+                        
+                    </div>
+                </div>
+            </div>
+            
+        </div> 
+
+        <div class="row">
+            <div class="col-sm-4 text-center">
+                <div class="title-marketing"><h3>@RetrospectiveColumnTypeEnum.Start</h3></div>
+                <ul class="list-group" name="Start" id="@("list_" + RetrospectiveColumnTypeEnum.Start)"></ul>
+                <button type="button" id="btn_start_addItem" disabled class="btn btn-primary"><i class="glyphicon glyphicon-plus"></i></button>
+            </div>
+            <div class="col-sm-4 text-center">
+                <div class="title-marketing"><h3>@RetrospectiveColumnTypeEnum.Stop</h3></div>
+                <ul class="list-group" name="Stop" id="@("list_" + RetrospectiveColumnTypeEnum.Stop)"></ul>
+                <button type="button" id="btn_stop_addItem" disabled class="btn btn-primary"><i class="glyphicon glyphicon-plus"></i></button>
+            </div>
+            <div class="col-sm-4 text-center">
+                <div class="title-marketing"><h3>@RetrospectiveColumnTypeEnum.Continue</h3></div>
+                <ul class="list-group" name="Continue" id="@("list_" + RetrospectiveColumnTypeEnum.Continue)"></ul>
+                <button type="button" id="btn_continue_addItem" disabled class="btn btn-primary"><i class="glyphicon glyphicon-plus"></i></button>
+            </div>
+        </div>
+        
+    </div>
+</div>
+
+
+
+

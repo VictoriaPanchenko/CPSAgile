@@ -1,0 +1,55 @@
+﻿#selectable li:hover {
+    background: #f398144d;
+    cursor: pointer;
+}
+
+#selectable .ui-selecting {
+    background: #FECA40 !important;
+}
+
+#selectable .ui-selected {
+    background: #F39814 !important;
+    color: white;
+}
+
+#selectable {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    display: block;
+}
+
+    #selectable li {
+        margin: 3px;
+        padding: 1px;
+        float: left;
+        width: 70px;
+        height: 45px;
+        font-size: 2em;
+        text-align: center;
+    }
+
+textarea.form-control {
+    max-width: 100%;
+    height: auto;
+    min-width: 100%;
+}
+
+.btn-danger {
+    margin-right: 15px;
+}
+
+.estimators {
+    white-space: normal;
+    margin-bottom: 10px;
+}
+
+#btn_coffeeBreak {
+    margin-left: 15px;
+}
+
+
+#btn_export {
+    margin-right: 15px;
+}

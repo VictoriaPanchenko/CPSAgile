@@ -1,0 +1,281 @@
+﻿@using CpsBoostAgile.DAO;
+@using CpsBoostAgile.Enumeration
+@model List<Event>
+@{
+    ViewBag.Title = "Events";
+}
+
+<link href="~/Content/Custom/modalwindow.css" rel="stylesheet" />
+<link href="~/Content/Custom/loader.css" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+
+<div class="modal fade" id="modal_delete" hidden tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header modal-header-primary text-center">
+                <h1>Deleting Event</h1>
+            </div>
+            <div class="modal-body">
+                <div id="div_text">Are you sure you want to delete this event?</div>
+                <div id="div_loader" class="loader" hidden></div>
+                <div id="div_failed" hidden>System failed. Please refresh web page.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="btn_cnfDelete" class="btn btn-danger text-center">Delete</button>
+                <button type="button" id="btn_cancel" class="btn btn-primary text-center">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="container">
+    <h3>My events</h3>
+    <ul class="nav nav-tabs">
+        <li class="active">
+            <a href="#allEvents" data-toggle="tab">All</a>
+        </li>
+        <li>
+            <a href="#inWaitingPhase" data-toggle="tab">Waiting</a>
+        </li>
+        <li>
+            <a href="#inProgress" data-toggle="tab">In Progress</a>
+        </li>
+        <li>
+            <a href="#completed" data-toggle="tab">Finished</a>
+        </li>
+    </ul>
+    <div class="tab-content clearfix">
+        <div class="tab-pane active" id="allEvents">
+            <table class="table" >
+                <thead>
+                    <tr>
+                        <th class="text-left"></th>
+                        <th class="text-left">Name</th>
+                        <th class="text-left">Project</th>
+                        <th class="text-left">Sprint</th>
+                        <th class="text-left">Team</th>
+                        <th class="text-left">Event type</th>
+                        <th class="text-left">State</th>
+                        <th class="text-left">Comment</th>
+                        <th class="text-left">Started</th>
+                        <th class="text-left">Finished</th>
+                        <th class="text-left"></th>
+                    </tr>
+                </thead>
+                <tbody class="table-hover">
+                    @foreach (var item in Model)
+                    {
+                    <tr>
+                        @if (item.Phase == PhaseEnum.Completed)
+                        {
+                            <td><a href="@Url.Action("Export", "Event", new { item.Id})"><i class="fa fa-lg fa-download" title="Export details"></i></a></td>
+                        }
+                        else
+                        {
+                            if (item.EventType == EventTypeEnum.Retrospective)
+                            {
+                                <td><a href="@Url.Action("ModeratorView", "Retrospective", new {item.Id})"><span class="fa fa-lg fa-eye" title="See details" style="color:green"></span></a></td>
+                            }
+
+                            if (item.EventType == EventTypeEnum.PokerPlanning)
+                            {
+                                <td><a href="@Url.Action("ModeratorViewPoker", "PokerPlanning", new {item.Id})"><span class="fa fa-lg fa-eye" title="See details" style="color:green"></span></a></td>
+                            }
+                        }
+            <td class="text-left">@item.Name</td>
+            <td class="text-left">@item.ProjectName</td>
+            <td class="text-left">@item.Sprint</td>
+            <td class="text-left">@item.TeamName</td>
+            <td class="text-left">@item.EventType</td>
+            <td class="text-left">@item.Phase</td>
+            <td class="text-left">@item.Comment</td>
+            <td class="text-left">@item.StartedDate</td>
+            <td class="text-left">@item.FinishedDate</td>
+                @if (item.Phase == PhaseEnum.Completed)
+                {
+                    <td><button id="@item.Id" class="btn-xs btn-danger delete" title="Delete event"><i class="fa fa-lg fa-trash"></i></button></td>
+                }
+                else
+                {
+                    <td></td>
+                }
+                
+             </tr>
+        }
+    </tbody>
+</table>
+</div>
+<div class="tab-pane" id="inWaitingPhase">
+<table class="table" >
+    <thead>
+        <tr>
+            <th class="text-left"></th>
+            <th class="text-left">Name</th>
+            <th class="text-left">Project</th>
+            <th class="text-left">Sprint</th>
+            <th class="text-left">Team</th>
+            <th class="text-left">Event type</th>
+            <th class="text-left">State</th>
+            <th class="text-left">Comment</th>
+            <th class="text-left">Started</th>
+            <th class="text-left">Finished</th>
+            <th class="text-left"></th>
+        </tr>
+    </thead>
+    <tbody class="table-hover" >
+        @foreach(var item in Model.Where(e => e.Phase == PhaseEnum.Awaiting))
+        {
+        <tr name="@item.Id" state="@item.Phase">
+            @if (item.EventType == EventTypeEnum.Retrospective)
+            {
+            <td><a href="@Url.Action("ModeratorView", "Retrospective", new {item.Id})"><span class="fa fa-lg fa-eye" title="See details" style="color:green"></span></a></td>
+            }
+
+            @if(item.EventType == EventTypeEnum.PokerPlanning)
+            {
+            <td><a href="@Url.Action("ModeratorViewPoker", "PokerPlanning", new {item.Id})"><span class="fa fa-lg fa-eye" title="See details" style="color:green"></span></a></td>
+            }
+            <td class="text-left">@item.Name</td>
+            <td class="text-left">@item.ProjectName</td>
+            <td class="text-left">@item.Sprint</td>
+            <td class="text-left">@item.TeamName</td>
+            <td class="text-left">@item.EventType</td>
+            <td class="text-left">@item.Phase</td>
+            <td class="text-left">@item.Comment</td>
+            <td class="text-left">@item.StartedDate</td>
+            <td class="text-left">@item.FinishedDate</td>
+            <td></td>
+        </tr>
+        }
+    </tbody>
+</table>
+</div>
+<div class="tab-pane" id="inProgress">
+<table class="table" >
+    <thead>
+        <tr>
+            <th class="text-left"></th>
+            <th class="text-left">Name</th>
+            <th class="text-left">Project</th>
+            <th class="text-left">Sprint</th>
+            <th class="text-left">Team</th>
+            <th class="text-left">Event type</th>
+            <th class="text-left">State</th>
+            <th class="text-left">Comment</th>
+            <th class="text-left">Started</th>
+            <th class="text-left">Finished</th>
+            <th class="text-left"></th>
+        </tr>
+    </thead>
+    <tbody class="table-hover" >
+        @foreach(var item in Model.Where(e => e.Phase != PhaseEnum.Awaiting && e.Phase != PhaseEnum.Completed))
+        {
+        <tr name="@item.Id" state="@item.Phase">
+            @if (item.EventType == EventTypeEnum.Retrospective)
+            {
+            <td><a href="@Url.Action("ModeratorView", "Retrospective", new {item.Id})"><span class="fa fa-lg fa-eye" title="See details" style="color:green"></span></a></td>
+            }
+
+            @if (item.EventType == EventTypeEnum.PokerPlanning)
+            {
+            <td><a href="@Url.Action("ModeratorViewPoker", "PokerPlanning", new {item.Id})"><span class="fa fa-lg fa-eye" title="See details" style="color:green"></span></a></td>
+            }
+            <td class="text-left">@item.Name</td>
+            <td class="text-left">@item.ProjectName</td>
+            <td class="text-left">@item.Sprint</td>
+            <td class="text-left">@item.TeamName</td>
+            <td class="text-left">@item.EventType</td>
+            <td class="text-left">@item.Phase</td>
+            <td class="text-left">@item.Comment</td>
+            <td class="text-left">@item.StartedDate</td>
+            <td class="text-left">@item.FinishedDate</td>
+            <td></td>
+        </tr>
+        }
+    </tbody>
+</table>
+</div>
+<div class="tab-pane" id="completed">
+<table class="table" >
+    <thead>
+        <tr>
+            <th class="text-left"></th>
+            <th class="text-left">Name</th>
+            <th class="text-left">Project</th>
+            <th class="text-left">Sprint</th>
+            <th class="text-left">Team</th>
+            <th class="text-left">Event type</th>
+            <th class="text-left">State</th>
+            <th class="text-left">Comment</th>
+            <th class="text-left">Started</th>
+            <th class="text-left">Finished</th>
+            <th class="text-left"></th>
+        </tr>
+    </thead>
+    <tbody class="table-hover" >
+        @foreach(var item in Model.Where(e => e.Phase == PhaseEnum.Completed))
+        {
+        <tr name="@item.Id" state="@item.Phase">
+            <td><a href="@Url.Action("Export", "Event", new { item.Id})"><i class="fa fa-lg fa-download" title="Export details"></i></a></td>
+            <td class="text-left">@item.Name</td>
+            <td class="text-left">@item.ProjectName</td>
+            <td class="text-left">@item.Sprint</td>
+            <td class="text-left">@item.TeamName</td>
+            <td class="text-left">@item.EventType</td>
+            <td class="text-left">@item.Phase</td>
+            <td class="text-left">@item.Comment</td>
+            <td class="text-left">@item.StartedDate</td>
+            <td class="text-left">@item.FinishedDate</td>
+            <td><button id="@item.Id" class="btn-xs btn-danger delete" title="Delete event"><i class="fa fa-lg fa-trash"></i></button></td>
+        </tr>
+        }
+    </tbody>
+</table>
+</div>
+</div>
+</div>
+@section scripts
+{
+<script>
+    $(function() {
+
+        $(document).ready(function () {
+
+            var itemToDelete;
+
+            $('.delete').click(function() {
+                itemToDelete = $(this).attr("id");
+                $('#modal_delete').modal('show');
+            });
+
+            $('#btn_cancel').click(function() {
+                $('#modal_delete').modal('hide');
+                itemToDelete = null;
+            });
+
+            $('#btn_cnfDelete').click(function() {
+
+                $('#div_text').hide();
+                $('#div_loader').show();
+                $('#btn_cnfDelete').prop('disabled', true);
+                $('#btn_cancel').prop('disabled', true);
+
+                $.ajax({
+                    type: "POST",
+                    url: '@(Url.Action("DeleteEvent", "Event"))' + "/" + itemToDelete,
+                    success: function(data) {
+                        var url = '@Url.Action("Events", "Event")';
+                        window.location.href = url;
+                    },
+                    error: function(error) {
+                        $('#div_failed').show();
+                        $('#div_loader').hide();
+                        $('#btn_cnfDelete').prop('disabled', false);
+                        $('#btn_cancel').prop('disabled', false);
+                    }
+                });
+            });
+
+        });
+    });
+</script>
+}

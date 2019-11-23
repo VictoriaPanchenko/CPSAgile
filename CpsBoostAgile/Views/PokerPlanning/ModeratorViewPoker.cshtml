@@ -1,0 +1,609 @@
+﻿@using CpsBoostAgile.Enumeration
+@model CpsBoostAgile.Models.PokerPlanning.PPViewModels
+
+@{
+    ViewBag.Title = "Poker Planning";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+
+    var currentUserStoryId = "";
+    var currentUserStoryText = "";
+    var currentUserStoryComment = "";
+    if (Model.CurrentRunningUserStory != null)
+    {
+        currentUserStoryId = Model.CurrentRunningUserStory.Id;
+        currentUserStoryText = Model.CurrentRunningUserStory.Description;
+        currentUserStoryComment = Model.CurrentRunningUserStory.Comment;
+    }
+}
+
+@section scripts{
+    <script src="~/Scripts/jquery.signalR-2.4.1.js"></script>
+    <script type="text/javascript" src="~/signalr/hubs"></script>
+    <script src="~/Scripts/clipboard.min.js"></script>
+    <script src="~/Scripts/jquery-ui.js"></script>
+    <link href="~/Content/Custom/userstory.css" rel="stylesheet" />
+    <link href="~/Content/Custom/loader.css" rel="stylesheet" />
+    <link href="~/Content/Custom/modalwindow.css" rel="stylesheet" />
+    <link href="~/Content/Custom/upperpanel.css" rel="stylesheet" />
+    <link href="~/Content/Custom/userscoloring.css" rel="stylesheet" />
+    <link href="~/Content/Custom/sidebar.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <script>
+
+        $(function() {
+            var userStory = '@currentUserStoryId';
+            var phasePP;
+            var userStoryIndex = @(Model.UserStoryList?.Count);
+            var itemToDelete;
+            $(document).ready(function() {
+
+                var clipboard = new ClipboardJS('.btn');
+
+
+                phasePP = '@Model.Phase';
+
+                switch (phasePP) {
+                    case '@PhaseEnum.Awaiting':
+                        startAwaitingPhase();
+                        break;
+                    case '@PhaseEnum.Running':
+                        setRunningPhase();
+                        break;
+                    case '@PhaseEnum.Presentation':
+                        switchToPresentationPhase();
+                        break;
+                    case '@PhaseEnum.Completed':
+                        finishPP();
+                        break;
+                }
+
+
+
+                var ppEventHub = $.connection.pokerPlanningHub;
+
+                ppEventHub.client.updateOnlineUsers = function(data) {
+                    var items = $.parseJSON(data);
+                    var i;
+
+                    $('#list_users').empty();
+
+                    for (i = 0; i < items.length; i++) {
+                        if (items[i].IsReadyToShare == true) {
+                            $('#list_users').append(
+                                '<li><i class="glyphicon glyphicon-ok user' +
+                                items[i].Color +
+                                '"></i> ' +
+                                items[i].Name +
+                                '</li>'
+                            );
+                        } else {
+                            $('#list_users').append(
+                                '<li><i class="glyphicon glyphicon-user user' +
+                                items[i].Color +
+                                '"></i> ' +
+                                items[i].Name +
+                                '</li>'
+                            );
+                        }
+                    }
+                    $('#div_onlineUsers').text('Online Users: ' + i);
+                };
+
+                ppEventHub.client.switchToReady = function () {
+                    $('#btn_ready').prop('disabled', true);
+                }
+
+                ppEventHub.client.startPresentation = function(estimations) {
+
+                    var items = $.parseJSON(estimations);
+                    var i;
+                    $('#estimation_results').empty();
+                    for (i = 0; i < items.length; i++) {
+
+                        var est;
+                        var strVoters = items[i].Voters.join(", ");
+                        if (items[i].Estimation == 9999) {
+                            $('#btn_coffeeBreak').show();
+                            est = '<li><h3><span style="background-color:#991414;" class="label col-md-2" ><i class="fa fa-coffee"></i></span><span class="col-md-1"></span><span style="text-align:left; background-color:#504272;" class="label col-md-9 estimators">' +
+                                items[i].NumberOfVoters +
+                                ' estimator(s): '+ strVoters +'</span></h3></li>';
+                        
+                            $('#estimation_results').append(est);
+
+                            continue;
+                        }
+
+                        est = '<li><h3><span style="background-color:#F39814;" class="label col-md-2" >' +
+                            items[i].Estimation +
+                            ' points</span> <span class="col-md-1"></span><span style="text-align:left; background-color:#504272;" class="label col-md-9 estimators">' +
+                            items[i].NumberOfVoters +
+                            ' estimator(s): '+ strVoters +'</span></h3></li><br>';
+                        
+                        $('#estimation_results').append(est);
+                    }
+                    switchToPresentationPhase();
+                }
+
+                ppEventHub.client.startUserStory = function (storyId, text, comment) {
+                    userStory = storyId;
+                    phasePP = '@PhaseEnum.Running';
+                    $('#selectable .ui-selected').removeClass('ui-selected');
+                    setRunningPhase();
+                    $("div[name='userStoryBody']").attr('id',storyId);
+                    $( "#userStoryComment" ).val('');
+                    $( "#userStoryText" ).empty();
+                    $( "#userStoryText" ).append(text);
+                    $( "#userStoryComment" ).val(comment);
+                }
+
+                ppEventHub.client.finishEvent = function () {
+                    phasePP = '@PhaseEnum.Completed';
+                    finishPP();
+                }
+
+                ppEventHub.client.showCoffeeBreak = function() {
+                    $('#modal_coffeeBreak').modal('show');
+                }
+
+                ppEventHub.client.continuePP = function() {
+                    $('#btn_coffeeBreak').hide();
+                    $('#modal_coffeeBreak').modal('hide');
+                }
+
+                ppEventHub.client.restoreStories = function(stories)
+                {
+                    var items = $.parseJSON(stories);
+                    var i;
+
+                    $('#userStory_preparation').empty();
+
+                    for (i = 0; i < items.length; i++) {
+                        var story;
+                        if (items[i].FinishedDate == null) {
+                            story = '<li id="' +
+                                items[i].Id +
+                                '" class="list-group-item well clearfix listBlock"><div class="title-marketing" style="text-align: left">' +
+                                '<button style="float:right" class="btn-xs btn-danger delete" title="Delete event"><i class="fa fa-lg fa-times"></i></button>' +
+                                '<h4>User Story ' +
+                                (i + 1) +
+                                '</h4></div><div align="left" class="form-control preparedItem">' +
+                                items[i].Description +
+                                '</div><br>' +
+                                '<button type="button" class="btn btn-success btn-lg btn_startUserStory" title="Start estimation">Start</button></li>';
+                        }
+                        else {
+                            var finalEstimation;
+                            if (items[i].FinalEstimation != null) {
+                                finalEstimation = items[i].FinalEstimation;
+                            } else {
+                                finalEstimation = "Not Estimated";
+                            }
+
+                            story = '<li id="' +
+                                items[i].Id +
+                                '" class="list-group-item well clearfix listBlock"><div class="title-marketing" style="text-align: left">' +
+                                '<h4>User Story ' +
+                                (i + 1) +
+                                '</h4></div><div align="left" class="form-control preparedItem">' +
+                                items[i].Description +
+                                '</div><br>' +
+                                '<h4>Final Estimation: ' + finalEstimation +'</h4></li>';
+                        }
+
+                        $('#userStory_preparation').append(story);
+                    }
+                }
+
+                ppEventHub.client.switchBackToAwaiting = function() {
+                    phasePP = '@PhaseEnum.Awaiting';
+                    startAwaitingPhase();
+
+                }
+
+                ppEventHub.client.updateComment = function(comment) {
+                    blinkTxt();
+                }
+
+                // server part
+                $.connection.hub.logging = true;
+
+                $.connection.hub.start().done(function() {
+                    ppEventHub.server.addModeratorToPool('@Model.Id');
+                });
+
+                $('#btn_ready').click(function () {
+                    ppEventHub.server.setUserReady();
+                });
+
+                $('#btn_coffeeBreak').click(function() {
+                    ppEventHub.server.setCoffeeBreak();
+                });
+
+                $('#btn_continueEvent').click(function() {
+                    ppEventHub.server.finishCoffeeBreak();
+                });
+                
+
+                $('#btn_startPresentationPhase').click(function () {
+                    var storyId = $("div[name='userStoryBody']").attr('id');
+                    ppEventHub.server.setToPresentation(storyId);
+                });
+
+                $('.estItem').click(function () {
+                    var estValue = $(this).val();
+                    ppEventHub.server.assignEstimationFromUser(estValue);
+                });
+
+                $(document).on('click', '#btn_sendComment', function () {
+
+                    var storyId = $("div[name='userStoryBody']").attr("id");
+                    var commentOnStory = $('#userStoryComment').val();
+                    ppEventHub.server.sendCommentToStory(storyId, commentOnStory);
+                });
+
+
+                $('#btn_addUserStory').click(function() {
+
+                    var actualIndex = userStoryIndex+1;
+                    userStoryIndex ++;
+
+                    // todo: add accordion collapse
+                    var item =
+                        $('<li name="' +
+                            actualIndex +
+                            '" class="list-group-item well clearfix listBlock" >' +
+                            '<div class="title-marketing" style="text-align:left"><button style="float:right" class="btn-xs btn-danger delete" title="Delete event"><i class="fa fa-lg fa-times"></i></button><h4>User Story ' +
+                            actualIndex +
+                            '</h4></div><textarea type="textarea" name="'+ actualIndex +'" cols="100" class="form-control preparedItem" placeholder="Write User Story"></textarea>' +
+                            '<br><button type="button" title="Save user story" class="btn btn-warning btn-lg btn_save_userstory">Save</button><button type="button" class="btn btn-lg btn-success btn_startUserStory" title="Start estimation" style="display: none">Start</button></li>'
+                        );
+
+                    $('#userStory_preparation').append(item);
+
+                    $('html,body').animate({
+                        scrollTop: $('#btn_addUserStory').offset().top},
+                        'slow');
+
+                    $(item).find('textarea').focus();
+                });
+
+                $(document).on('click', '.btn_startUserStory', function () {
+                    var storyId = $(this).parent().attr('id');
+                    userStory = storyId;
+                    ppEventHub.server.setToRunning(storyId);
+                });
+
+                $('.btn_finish_event').click(function() {
+                    ppEventHub.server.finishPokerPlanning();
+                });
+
+                $('#btn_startSecondRound').click(function () {
+                    ppEventHub.server.setToRunning(userStory);
+                });
+
+                $('.btn_finish_userstory').click(function() {
+                    var storyId = $("div[name='userStoryBody']").attr('id');
+                    ppEventHub.server.finishUserStoryEstimation(storyId);
+                });
+
+            });
+
+
+
+
+            $(document).on('click', '.btn_save_userstory', function () {
+                var storyIndex = $(this).parent().attr('name');
+                var text = $(this).parent().find('textarea').val();
+
+                $.ajax({
+                    type: "POST",
+                    url: '@Url.Action("SaveUserStory", "PokerPlanning")',
+                    data: { 'text': text, 'ppEventId': '@Model.Id' },
+                    success: function (data) {
+
+                        if (data.isSaved) {
+                            $("li[name=" + storyIndex + "]").find('.btn_save_userstory').hide();
+                            $("li[name=" + storyIndex + "]").find('.btn_startUserStory').show();
+                            $("li[name=" + storyIndex + "]").attr('id', data.userStoryId);
+
+                            var newDiv = '<div align="left" class="form-control preparedItem">' + text + '</div>';
+                            $("textarea[name=" + storyIndex + "]").replaceWith(newDiv);
+
+
+                        } else {
+                            alert("User Story text must be filled before saving!");
+                            $('#' + storyIndex).focus();
+                        }
+
+                    },
+                    error: function(error) {
+
+                    }
+                });
+            });
+
+            $('#btn_toEvents').click(function () {
+                var url = '@Url.Action("Events", "Event")';
+                window.location.href = url;
+            });
+
+            
+            
+
+            function startAwaitingPhase() {
+                $('#running_phase_panel').hide();
+                $('#presentation_phase_panel').hide();
+                $('#estimation_results').hide();
+                $("#selectable").hide();
+                $("div[name='userStoryBody']").hide();
+                $("#selectable").hide();
+                $("#btn_coffeeBreak").hide();
+                
+                $('#shareUrl').show();
+                $('#awaiting_phase_panel').show();
+                $('#userStory_preparation').show();
+                $('#div_addUserStory').show();
+            };
+
+            function setRunningPhase() {
+                $('#btn_coffeeBreak').hide();
+                $('#estimation_results').hide();
+                $('#awaiting_phase_panel').hide();
+                $('#presentation_phase_panel').hide();
+                $('#userStory_preparation').hide();
+                $('#div_addUserStory').hide();
+                $("#btn_coffeeBreak").hide();
+                $('#btn_ready').prop('disabled', false);
+                $('#running_phase_panel').show();
+                $('#shareUrl').show();
+                $("#selectable").show();
+                $("div[name='userStoryBody']").show();
+                $( "#selectable" ).selectable();
+
+            };
+
+            function switchToPresentationPhase() {
+                $('#awaiting_phase_panel').hide();
+                $('#running_phase_panel').hide();
+                $('#userStory_preparation').hide();
+                $('#div_addUserStory').hide();
+                $('#shareUrl').hide();
+                $("#selectable").hide();
+                $('#presentation_phase_panel').show();
+                $("div[name='userStoryBody']").show();
+                $('#estimation_results').show();
+            };
+
+            function finishPP() {
+                $('#awaiting_phase_panel').hide();
+                $('#running_phase_panel').hide();
+                $('#userStory_preparation').hide();
+                $('#div_addUserStory').hide();
+                $("#selectable").hide();
+                $("div[name='userStoryBody']").hide();
+                $('#shareUrl').hide();
+                $("#selectable").hide();
+                $("div[name='userStoryBody']").hide();
+                $("#completed_phase_panel").show();
+            };
+
+
+
+            function blinkTxt() {
+
+                $('.blink').fadeOut('slow', function() {
+                    $(this).fadeIn('slow', function() {
+                        $(this).fadeOut('slow');
+                    });
+                });
+            }
+
+
+            $(document).on('click', '.delete', function () {
+                itemToDelete = $(this).parent().parent().attr("id");
+                if (typeof itemToDelete === 'undefined') {
+                    $(this).parent().parent().remove();
+
+                } else {
+                    $('#modal_delete').modal('show');
+                }
+            });
+
+            $('#btn_cancel').click(function() {
+                $('#modal_delete').modal('hide');
+                itemToDelete = null;
+            });
+
+            $('#btn_cnfDelete').click(function() {
+
+                $('#div_text').hide();
+                $('#div_loader').show();
+                $('#btn_cnfDelete').prop('disabled', true);
+                $('#btn_cancel').prop('disabled', true);
+
+
+                $.ajax({
+                    type: "POST",
+                    url: '@(Url.Action("DeleteUserStory", "PokerPlanning"))' + "/" + itemToDelete,
+                    success: function (data) {
+                        if (data.success == true) {
+                            $('#' + itemToDelete).remove();
+
+                            $('#modal_delete').modal('hide');
+                            $('#div_text').show();
+                            $('#btn_cnfDelete').prop('disabled', false);
+                            $('#btn_cancel').prop('disabled', false);
+                        } else {
+                            $('#div_failed').show();
+                            $('#div_loader').hide();
+                            $('#btn_cnfDelete').prop('disabled', false);
+                            $('#btn_cancel').prop('disabled', false);
+                        }
+
+                        itemToDelete = null;
+                    },
+                    error: function(error) {
+                        $('#div_failed').show();
+                        $('#div_loader').hide();
+                        $('#btn_cnfDelete').prop('disabled', false);
+                        $('#btn_cancel').prop('disabled', false);
+                    }
+                });
+            });
+        });
+    </script>
+}
+
+<div class="container-fluid">
+
+
+    <div id="onlineUsersNavigationBar" class="sidenav">
+        <h5 id="div_onlineUsers"></h5>
+        <ul class="list-group" id="list_users"></ul>
+    </div>
+
+    <div id="main">
+
+        <div class="well">
+            <div class="row text-center" hidden id="shareUrl">
+                <h3>Share URL with your team</h3>
+                <h4 id="url_event" class="break-word">@Model.Url</h4>
+                <button class="btn btn-default" type="button" data-clipboard-target="#url_event">Copy</button>
+            </div>
+
+            <div class="row" hidden id="awaiting_phase_panel">
+                <div class="col-md-6 text-center">
+                </div>
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-right" role="group">
+                        <button type="button" class="btn btn-danger text-center btn_finish_event">Finish Event</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row" hidden id="running_phase_panel">
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-left" role="group">
+                        <button type="button" id="btn_ready" class="btn btn-info text-center">I am ready</button>
+                    </div>
+                </div>
+                <div class="col-md-6 text-center">
+                    <div class="btn-group btn-group-lg pull-right" role="group">
+                        <button type="button" id="btn_startPresentationPhase" class="btn btn-success text-center">Reveal cards</button>
+                        
+                    </div>
+                </div>
+            </div>
+
+            <div class="row" hidden id="presentation_phase_panel">
+                <div class="row text-center">
+                    <h3>Discuss results with the team!</h3>
+                </div>
+                <br>
+                <div>
+                    <button  type="button" style="background-color:#991414; display: none;" id="btn_coffeeBreak" title="Start coffee break" class="btn btn-warning btn-lg text-center"><i class="fa fa-coffee"></i> Coffee break</button>
+                    <div class="btn-group btn-group-lg pull-right" role="group" aria-label="...">
+                        <button type="button" id="btn_startSecondRound" class="btn btn-success text-center">Start second round</button>
+                        <button type="button" class="btn btn-danger text-center btn_finish_userstory">Finish User Story</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row" hidden id="completed_phase_panel">
+                <div class="text-center">
+                    <h3>Poker Planning is finished!</h3>
+                </div>
+                <br>
+                <div class="text-center">
+                    <div class="btn-group btn-group-lg pull-right" role="group" aria-label="...">
+                        <button type="button" id="btn_toEvents" class="btn btn-primary text-center">To My Events</button>
+                        <button id="btn_export" onclick="location.href='@Url.Action("Export", "Event", new {Model.Id})'" style="background-color:green" type="button" class="btn btn-primary text-center">Export to Excel</button>
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+
+        <div class="row" style="text-align:right">
+            <ul class="list-group" hidden id="userStory_preparation">
+            </ul>
+        </div>
+
+        <div class="row" hidden id="div_addUserStory" style="text-align:center;">
+            <div>
+                <button type="button" title="Add User Story" id="btn_addUserStory" class="btn btn-primary btn-lg"><i class="glyphicon glyphicon-plus"></i> Add User Story</button>
+            </div>
+        </div>
+        
+        <div class="row" style="text-align:left">
+            <ul class="list-group" style="list-style-type:none" hidden id="estimation_results"></ul>
+        </div>
+        
+        <div class="row" >
+            <ol hidden id="selectable">
+                <li value="0" class="ui-state-default estItem">0</li>
+                <li value="1" class="ui-state-default estItem">1</li>
+                <li value="2" class="ui-state-default estItem">2</li>
+                <li value="3" class="ui-state-default estItem">3</li>
+                <li value="5" class="ui-state-default estItem">5</li>
+                <li value="8" class="ui-state-default estItem">8</li>
+                <li value="13" class="ui-state-default estItem">13</li>
+                <li value="21" class="ui-state-default estItem">21</li>
+                <li value="34" class="ui-state-default estItem">34</li>
+                <li value="55" class="ui-state-default estItem">55</li>
+                <li value="89" class="ui-state-default estItem">89</li>
+                <li value="9999" class="ui-state-default estItem"><i class="fa fa-coffee"></i></li>
+            </ol>
+        </div>
+        <br>
+        <div class="row" hidden name="userStoryBody" id="@currentUserStoryId"style="text-align:right">
+            <div class="well clearfix" style="text-align:center"><h3>User Story</h3><h4><div id="userStoryText" class="form-control">@currentUserStoryText</div></h4></div>
+            <div class="well clearfix" style="text-align:center"><h3>Comment</h3><h4 hidden class="blink" style="color:green">Comment send!</h4>
+                <textarea id="userStoryComment" class="form-control" placeholder="Write Comment">@currentUserStoryComment</textarea>
+                <br><button type="button"  id="btn_sendComment" title="Show comment to users" class="btn btn-info btn-lg">Send</button>
+            </div>
+        </div>
+        
+        
+    </div>
+</div>
+
+<div class="modal fade" id="modal_delete" hidden tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header modal-header-primary text-center">
+                <h1>Deleting User Story</h1>
+            </div>
+            <div class="modal-body">
+                <div id="div_text">Are you sure you want to delete this user story?</div>
+                <div id="div_loader" class="loader" hidden></div>
+                <div id="div_failed" hidden>System failed. Please refresh web page.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="btn_cnfDelete" class="btn btn-danger text-center">Delete</button>
+                <button type="button" id="btn_cancel" class="btn btn-primary text-center">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modal_coffeeBreak" hidden tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header modal-header-primary text-center">
+                <h1><i class="fa fa-coffee"></i> Coffee break!</h1>
+            </div>
+            <div class="modal-body">
+                <h4 class="text-center" id="div_text_coffee">Click 'Continue' to return to Poker Planning event</h4>
+                <div id="div_loader_coffee" class="loader"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="btn_continueEvent" title="Continue event" class="btn btn-success text-center">Continue</button>
+                
+            </div>
+        </div>
+    </div>
+</div>
+
